@@ -52,6 +52,7 @@ class BookingService:
         self._check_advance_window(start)  # FR-2
         self._check_duration(room, start, end)  # FR-3
         self._check_business_hours(start, end)  # FR-4
+        self._check_overlap(room_id, start, end)  # FR-1
 
         booking = Booking(room_id=room_id, user_id=user_id, start=start, end=end, title=title)
         self._repo.save_booking(booking)
@@ -97,3 +98,9 @@ class BookingService:
             raise BookingError("OUTSIDE_BUSINESS_HOURS", "จองได้เฉพาะวันจันทร์ถึงวันศุกร์")
         if start.time() < BUSINESS_START or end.time() > BUSINESS_END:
             raise BookingError("OUTSIDE_BUSINESS_HOURS", "จองได้เฉพาะเวลา 08:00 ถึง 18:00 น.")
+
+    def _check_overlap(self, room_id: str, start: datetime, end: datetime) -> None:
+        # ชนขอบได้ (end == start ไม่ถือว่าซ้อน) และการจองที่ยกเลิกแล้วไม่นับ
+        for other in self._repo.list_bookings(room_id):
+            if other.is_active and start < other.end and end > other.start:
+                raise BookingError("BOOKING_OVERLAP", "ห้องนี้มีการจองในช่วงเวลาดังกล่าวแล้ว")
