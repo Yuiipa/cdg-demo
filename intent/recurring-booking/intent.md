@@ -1,6 +1,6 @@
 # Intent: จองห้องประชุมซ้ำรายสัปดาห์
 
-Author: Kit Reference (facilities analyst) · Status: proposed
+Author: Kit Reference (facilities analyst) · Status: accepted
 Source: BOOK-142
 
 ## Problem
