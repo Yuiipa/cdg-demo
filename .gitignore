@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+.mcp.json
+.claude/settings.local.json
+.claude/worktrees/
+.claude/loop_state.json
+artifacts/
+my/
+evals/results/
+deploy/

@@ -1,0 +1,10 @@
+[project]
+name = "cdg-claude-code-demo"
+version = "3.0.0"
+description = "Meeting room booking - demo project for the CDG Claude Code course"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
