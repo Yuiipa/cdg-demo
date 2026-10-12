@@ -1,0 +1,62 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(python -m pytest)",
+      "Bash(python -m pytest *)",
+      "PowerShell(python -m pytest)",
+      "PowerShell(python -m pytest *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "PowerShell(git status)",
+      "PowerShell(git status *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "PowerShell(git diff)",
+      "PowerShell(git diff *)",
+      "Bash(git log)",
+      "Bash(git log *)",
+      "PowerShell(git log)",
+      "PowerShell(git log *)",
+      "Bash(python scripts/docx2md.py *)",
+      "PowerShell(python scripts/docx2md.py *)",
+      "Bash(python scripts/pii_scan.py *)",
+      "PowerShell(python scripts/pii_scan.py *)",
+      "Bash(python scripts/doctor.py *)",
+      "PowerShell(python scripts/doctor.py *)",
+      "Bash(python scripts/audit.py)",
+      "Bash(python scripts/audit.py *)",
+      "PowerShell(python scripts/audit.py)",
+      "PowerShell(python scripts/audit.py *)",
+      "mcp__internal-tools__get_ticket",
+      "mcp__internal-tools__search_tickets",
+      "mcp__internal-tools__list_rooms",
+      "mcp__internal-tools__get_room_usage"
+    ],
+    "ask": [
+      "mcp__internal-tools__add_ticket_comment",
+      "Bash(git commit *)",
+      "PowerShell(git commit *)",
+      "Bash(powershell *)",
+      "Bash(pwsh *)",
+      "Bash(cmd *)",
+      "Bash(cmd.exe *)"
+    ],
+    "deny": [
+      "Read(./.env*)",
+      "Bash(git push)",
+      "Bash(git push *)",
+      "PowerShell(git push)",
+      "PowerShell(git push *)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)",
+      "Bash(git rm *)",
+      "PowerShell(git rm *)",
+      "PowerShell(Remove-Item *)",
+      "WebFetch"
+    ]
+  },
+  "env": {
+    "PYTHONUTF8": "1"
+  }
+}

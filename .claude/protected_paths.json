@@ -1,0 +1,10 @@
+{
+  "protected": [
+    "tests/test_rules.py",
+    "tests/test_service.py",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/",
+    ".claude/protected_paths.json"
+  ]
+}
