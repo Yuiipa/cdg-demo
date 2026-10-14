@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 
-from booking.models import Booking, Room
+from uuid import uuid4
+
+from booking.models import Booking, RecurringResult, Room, SkippedOccurrence
 from booking.storage import InMemoryRepository
 
 MAX_ADVANCE = timedelta(days=30)
@@ -16,6 +18,7 @@ MAX_DURATION = timedelta(hours=4)
 BUSINESS_START = time(8, 0)
 BUSINESS_END = time(18, 0)
 MIN_CANCEL_NOTICE = timedelta(hours=1)
+MAX_RECURRENCE_WEEKS = 4
 
 
 class BookingError(Exception):
@@ -57,6 +60,74 @@ class BookingService:
         booking = Booking(room_id=room_id, user_id=user_id, start=start, end=end, title=title)
         self._repo.save_booking(booking)
         return booking
+
+    def create_recurring_booking(
+        self,
+        room_id: str,
+        user_id: str,
+        start: datetime,
+        end: datetime,
+        weeks: int,
+    ) -> RecurringResult:
+        if not isinstance(weeks, int) or weeks < 1:
+            raise BookingError(
+                "INVALID_RECURRENCE", "จำนวนสัปดาห์ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป"
+            )
+        if weeks > MAX_RECURRENCE_WEEKS:
+            raise BookingError("RECURRENCE_TOO_LONG", "จองซ้ำได้ไม่เกิน 4 สัปดาห์ต่อชุด")
+
+        now = self._clock()  # จับครั้งเดียว ใช้ตรวจ 30 วันของทุกสัปดาห์ในชุด (R5)
+
+        room = self._repo.get_room(room_id)
+        if room is None:
+            raise BookingError("ROOM_NOT_FOUND", f"ไม่พบห้อง {room_id}")
+        if end <= start:
+            raise BookingError("INVALID_TIME_RANGE", "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม")
+        self._check_duration(room, start, end)  # FR-3
+        self._check_business_hours(start, end)  # FR-4
+        self._check_advance_window(start)  # FR-2 ของครั้งแรก (R4)
+
+        series_id = uuid4().hex[:8]
+        created: list[Booking] = []
+        skipped: list[SkippedOccurrence] = []
+
+        for i in range(weeks):
+            occurrence_start = start + timedelta(days=7 * i)
+            occurrence_end = end + timedelta(days=7 * i)
+
+            if occurrence_start - now > MAX_ADVANCE:  # R6, ใช้ now เดิม ไม่เรียก _check_advance_window ซ้ำ
+                skipped.append(
+                    SkippedOccurrence(
+                        start=occurrence_start,
+                        code="BEYOND_HORIZON",
+                        message="เกินระยะจองล่วงหน้า 30 วัน จองสัปดาห์นี้ภายหลังได้",
+                    )
+                )
+                continue
+
+            try:
+                self._check_overlap(room_id, occurrence_start, occurrence_end)  # FR-1 (R7)
+            except BookingError:
+                skipped.append(
+                    SkippedOccurrence(
+                        start=occurrence_start,
+                        code="BOOKING_OVERLAP",
+                        message="ห้องถูกจองแล้ว (ติดต่อฝ่ายอาคาร)",
+                    )
+                )
+                continue
+
+            booking = Booking(
+                room_id=room_id,
+                user_id=user_id,
+                start=occurrence_start,
+                end=occurrence_end,
+                series_id=series_id,
+            )
+            self._repo.save_booking(booking)  # R8
+            created.append(booking)
+
+        return RecurringResult(created=created, skipped=skipped)
 
     def cancel_booking(self, booking_id: str, cancelled_by: str) -> Booking:
         booking = self._repo.get_booking(booking_id)
