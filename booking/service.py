@@ -74,22 +74,28 @@ class BookingService:
             raise BookingError("INVALID_RECURRENCE", "จำนวนสัปดาห์ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป")
         if weeks > MAX_OCCURRENCES:
             raise BookingError(
-                "RECURRENCE_TOO_LONG", f"จองซ้ำรายสัปดาห์ได้ไม่เกิน {MAX_OCCURRENCES} ครั้งต่อชุด"
+                "RECURRENCE_TOO_LONG", f"จองซ้ำได้ไม่เกิน {MAX_OCCURRENCES} สัปดาห์ต่อชุด"
             )
         self._check_slot(room_id, start, end)  # ครั้งแรกต้องผ่านกฎเดิมทั้งหมด
+        now = self._clock()  # จับครั้งเดียว ใช้ตรวจ 30 วันของทุกสัปดาห์ (R5) ห้ามเรียก clock() ซ้ำในลูป
 
         series_id = uuid4().hex[:8]
         result = RecurringResult()
         for i in range(weeks):
             occ_start = start + timedelta(weeks=i)
             occ_end = end + timedelta(weeks=i)
+            if occ_start - now > MAX_ADVANCE:
+                result.skipped.append(
+                    SkippedOccurrence(
+                        start=occ_start, code="BEYOND_HORIZON", message=SKIPPED_MESSAGES["BEYOND_HORIZON"]
+                    )
+                )
+                continue
             try:
-                self._check_slot(room_id, occ_start, occ_end)
                 self._check_overlap(room_id, occ_start, occ_end)
             except BookingError as err:
-                code = "BEYOND_HORIZON" if err.code == "TOO_FAR_AHEAD" else err.code
-                message = SKIPPED_MESSAGES.get(code, err.message)
-                result.skipped.append(SkippedOccurrence(start=occ_start, code=code, message=message))
+                message = SKIPPED_MESSAGES.get(err.code, err.message)
+                result.skipped.append(SkippedOccurrence(start=occ_start, code=err.code, message=message))
                 continue
             booking = Booking(
                 room_id=room_id, user_id=user_id, start=occ_start, end=occ_end, series_id=series_id

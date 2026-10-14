@@ -1,10 +1,11 @@
-"""BOOK-142: จองซ้ำรายสัปดาห์ ตาม intent/recurring-booking/spec.md (R1-R7)."""
+"""BOOK-142: จองซ้ำรายสัปดาห์ ตาม intent/recurring-booking/spec.md (R1-R11)."""
 
 from datetime import datetime
 
 import pytest
 
 from booking import BookingError, BookingService, InMemoryRepository, Room
+from booking.service import MAX_OCCURRENCES
 
 NOW = datetime(2026, 10, 5, 9, 0)  # วันจันทร์
 
@@ -30,21 +31,29 @@ def test_series_shares_series_id(service):  # R1
     assert [b.start.day for b in result.created] == [6, 13, 20, 27]
 
 
-def test_too_many_weeks_rejected_and_nothing_created(service):  # R2
+@pytest.mark.parametrize("weeks", [0, -1, 1.5, "4"])
+def test_invalid_weeks_rejected_and_nothing_created(service, weeks):  # R2
+    with pytest.raises(BookingError) as exc:
+        service.create_recurring_booking("R102", "team-lead", tue(6, 14), tue(6, 15), weeks)
+    assert exc.value.code == "INVALID_RECURRENCE"
+    assert service.list_bookings("R102") == []
+
+
+def test_too_many_weeks_rejected_and_nothing_created(service):  # R3
     with pytest.raises(BookingError) as exc:
         service.create_recurring_booking("R102", "team-lead", tue(6, 14), tue(6, 15), 6)
     assert exc.value.code == "RECURRENCE_TOO_LONG"
     assert service.list_bookings("R102") == []
 
 
-def test_invalid_first_slot_raises_existing_code(service):  # R3
+def test_invalid_first_slot_raises_existing_code(service):  # R4
     with pytest.raises(BookingError) as exc:
         service.create_recurring_booking("R102", "team-lead", tue(6, 17), tue(6, 19), 2)
     assert exc.value.code == "OUTSIDE_BUSINESS_HOURS"
     assert service.list_bookings("R102") == []
 
 
-def test_conflicting_and_far_weeks_are_skipped(service):  # R4 + R5
+def test_conflicting_and_far_weeks_are_skipped(service):  # R6 + R7
     service.create_booking("R102", "someone-else", tue(27, 14), tue(27, 15))
     result = service.create_recurring_booking("R102", "team-lead", tue(20, 14), tue(20, 15), 4)
     assert [b.start for b in result.created] == [tue(20, 14), datetime(2026, 11, 3, 14, 0)]
@@ -54,7 +63,23 @@ def test_conflicting_and_far_weeks_are_skipped(service):  # R4 + R5
     ]
 
 
-def test_cancel_single_occurrence(service):  # R6
+def test_clock_captured_once_per_series_not_per_occurrence():  # R5
+    # ถ้า clock() ถูกเรียกใหม่ทุกสัปดาห์ในลูป (ขัด R5) จำนวนครั้งจะแปรผันตาม weeks
+    # ที่ถูกต้องคือคงที่เสมอ: 1 ครั้งตรวจครั้งแรก (R4) + 1 ครั้งจับ now (R5) = 2
+    calls: list[None] = []
+    repo = InMemoryRepository()
+    repo.add_room(Room(room_id="R102", name="ห้องประชุมเล็ก", capacity=6))
+
+    def counting_clock() -> datetime:
+        calls.append(None)
+        return NOW
+
+    svc = BookingService(repo, clock=counting_clock)
+    svc.create_recurring_booking("R102", "team-lead", tue(6, 14), tue(6, 15), MAX_OCCURRENCES)
+    assert len(calls) == 2
+
+
+def test_cancel_single_occurrence(service):  # R9
     result = service.create_recurring_booking("R102", "team-lead", tue(6, 14), tue(6, 15), 3)
     service.cancel_booking(result.created[1].booking_id, "team-lead")
     active = service.list_bookings("R102")
