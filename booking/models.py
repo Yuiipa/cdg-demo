@@ -27,7 +27,7 @@ class Booking:
     title: str = ""
     booking_id: str = field(default_factory=lambda: uuid4().hex[:8])
     status: str = "CONFIRMED"  # CONFIRMED | CANCELLED
-    series_id: str | None = None
+    series_id: str | None = None  # ค่าเดียวกันทุกครั้งในชุดการจองรายสัปดาห์ (BOOK-142)
 
     @property
     def is_active(self) -> bool:
@@ -36,7 +36,7 @@ class Booking:
 
 @dataclass
 class SkippedOccurrence:
-    """การจองซ้ำ 1 สัปดาห์ที่ถูกข้ามไปในชุด (ไม่ถือเป็นการปฏิเสธทั้งคำขอ)."""
+    """ครั้งในชุดที่จองไม่ได้: ไม่มีข้อมูลของผู้จองคนอื่น (booking-policy / PDPA)."""
 
     start: datetime
     code: str
@@ -45,7 +45,7 @@ class SkippedOccurrence:
 
 @dataclass
 class RecurringResult:
-    """ผลลัพธ์ของการสร้างการจองซ้ำ 1 ชุด."""
+    """ผลการจองรายสัปดาห์: ครั้งที่จองได้ และครั้งที่ข้าม."""
 
-    created: list[Booking]
-    skipped: list[SkippedOccurrence]
+    created: list[Booking] = field(default_factory=list)
+    skipped: list[SkippedOccurrence] = field(default_factory=list)

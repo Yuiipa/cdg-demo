@@ -1,8 +1,6 @@
 {
-  "env": {
-    "PYTHONUTF8": "1"
-  },
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(python -m pytest)",
       "Bash(python -m pytest *)",
@@ -35,6 +33,15 @@
       "mcp__internal-tools__list_rooms",
       "mcp__internal-tools__get_room_usage"
     ],
+    "ask": [
+      "mcp__internal-tools__add_ticket_comment",
+      "Bash(git commit *)",
+      "PowerShell(git commit *)",
+      "Bash(powershell *)",
+      "Bash(pwsh *)",
+      "Bash(cmd *)",
+      "Bash(cmd.exe *)"
+    ],
     "deny": [
       "Read(./.env*)",
       "Bash(git push)",
@@ -47,20 +54,24 @@
       "PowerShell(git rm *)",
       "PowerShell(Remove-Item *)",
       "WebFetch"
-    ],
-    "ask": [
-      "mcp__internal-tools__add_ticket_comment",
-      "Bash(git commit *)",
-      "PowerShell(git commit *)",
-      "Bash(powershell *)",
-      "Bash(pwsh *)",
-      "Bash(cmd *)",
-      "Bash(cmd.exe *)"
-    ],
-    "defaultMode": "acceptEdits"
+    ]
   },
-  "enabledPlugins": {
-    "feature-dev@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true
+  "env": {
+    "PYTHONUTF8": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/linkage_guard.py\" || exit 2",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

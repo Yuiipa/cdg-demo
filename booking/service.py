@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
-
 from uuid import uuid4
 
 from booking.models import Booking, RecurringResult, Room, SkippedOccurrence
@@ -18,7 +17,12 @@ MAX_DURATION = timedelta(hours=4)
 BUSINESS_START = time(8, 0)
 BUSINESS_END = time(18, 0)
 MIN_CANCEL_NOTICE = timedelta(hours=1)
-MAX_RECURRENCE_WEEKS = 4
+MAX_OCCURRENCES = 4  # PO decision (BOOK-142)
+# ข้อความใน skipped: ห้ามระบุตัวผู้จองคนอื่น (booking-policy, PDPA)
+SKIPPED_MESSAGES = {
+    "BOOKING_OVERLAP": "ห้องถูกจองแล้ว (ติดต่อฝ่ายอาคาร)",
+    "BEYOND_HORIZON": "เกินระยะจองล่วงหน้า 30 วัน จองสัปดาห์นี้ภายหลังได้",
+}
 
 
 class BookingError(Exception):
@@ -46,15 +50,7 @@ class BookingService:
         end: datetime,
         title: str = "",
     ) -> Booking:
-        room = self._repo.get_room(room_id)
-        if room is None:
-            raise BookingError("ROOM_NOT_FOUND", f"ไม่พบห้อง {room_id}")
-        if end <= start:
-            raise BookingError("INVALID_TIME_RANGE", "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม")
-
-        self._check_advance_window(start)  # FR-2
-        self._check_duration(room, start, end)  # FR-3
-        self._check_business_hours(start, end)  # FR-4
+        self._check_slot(room_id, start, end)
         self._check_overlap(room_id, start, end)  # FR-1
 
         booking = Booking(room_id=room_id, user_id=user_id, start=start, end=end, title=title)
@@ -69,65 +65,38 @@ class BookingService:
         end: datetime,
         weeks: int,
     ) -> RecurringResult:
-        if not isinstance(weeks, int) or weeks < 1:
+        """จองห้องเดิม เวลาเดิม ซ้ำทุกสัปดาห์ `weeks` ครั้ง (BOOK-142).
+
+        สัปดาห์ที่ชน (FR-1) หรือเกิน 30 วัน (FR-2) ถูกข้ามและรายงานใน skipped
+        ส่วนคำขอที่ผิดตั้งแต่ครั้งแรก (ห้อง เวลา FR-2..FR-4) raise BookingError และไม่สร้างอะไรเลย
+        """
+        if isinstance(weeks, bool) or not isinstance(weeks, int) or weeks < 1:
+            raise BookingError("INVALID_RECURRENCE", "จำนวนสัปดาห์ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป")
+        if weeks > MAX_OCCURRENCES:
             raise BookingError(
-                "INVALID_RECURRENCE", "จำนวนสัปดาห์ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป"
+                "RECURRENCE_TOO_LONG", f"จองซ้ำรายสัปดาห์ได้ไม่เกิน {MAX_OCCURRENCES} ครั้งต่อชุด"
             )
-        if weeks > MAX_RECURRENCE_WEEKS:
-            raise BookingError("RECURRENCE_TOO_LONG", "จองซ้ำได้ไม่เกิน 4 สัปดาห์ต่อชุด")
-
-        now = self._clock()  # จับครั้งเดียว ใช้ตรวจ 30 วันของทุกสัปดาห์ในชุด (R5)
-
-        room = self._repo.get_room(room_id)
-        if room is None:
-            raise BookingError("ROOM_NOT_FOUND", f"ไม่พบห้อง {room_id}")
-        if end <= start:
-            raise BookingError("INVALID_TIME_RANGE", "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม")
-        self._check_duration(room, start, end)  # FR-3
-        self._check_business_hours(start, end)  # FR-4
-        self._check_advance_window(start)  # FR-2 ของครั้งแรก (R4)
+        self._check_slot(room_id, start, end)  # ครั้งแรกต้องผ่านกฎเดิมทั้งหมด
 
         series_id = uuid4().hex[:8]
-        created: list[Booking] = []
-        skipped: list[SkippedOccurrence] = []
-
+        result = RecurringResult()
         for i in range(weeks):
-            occurrence_start = start + timedelta(days=7 * i)
-            occurrence_end = end + timedelta(days=7 * i)
-
-            if occurrence_start - now > MAX_ADVANCE:  # R6, ใช้ now เดิม ไม่เรียก _check_advance_window ซ้ำ
-                skipped.append(
-                    SkippedOccurrence(
-                        start=occurrence_start,
-                        code="BEYOND_HORIZON",
-                        message="เกินระยะจองล่วงหน้า 30 วัน จองสัปดาห์นี้ภายหลังได้",
-                    )
-                )
-                continue
-
+            occ_start = start + timedelta(weeks=i)
+            occ_end = end + timedelta(weeks=i)
             try:
-                self._check_overlap(room_id, occurrence_start, occurrence_end)  # FR-1 (R7)
-            except BookingError:
-                skipped.append(
-                    SkippedOccurrence(
-                        start=occurrence_start,
-                        code="BOOKING_OVERLAP",
-                        message="ห้องถูกจองแล้ว (ติดต่อฝ่ายอาคาร)",
-                    )
-                )
+                self._check_slot(room_id, occ_start, occ_end)
+                self._check_overlap(room_id, occ_start, occ_end)
+            except BookingError as err:
+                code = "BEYOND_HORIZON" if err.code == "TOO_FAR_AHEAD" else err.code
+                message = SKIPPED_MESSAGES.get(code, err.message)
+                result.skipped.append(SkippedOccurrence(start=occ_start, code=code, message=message))
                 continue
-
             booking = Booking(
-                room_id=room_id,
-                user_id=user_id,
-                start=occurrence_start,
-                end=occurrence_end,
-                series_id=series_id,
+                room_id=room_id, user_id=user_id, start=occ_start, end=occ_end, series_id=series_id
             )
-            self._repo.save_booking(booking)  # R8
-            created.append(booking)
-
-        return RecurringResult(created=created, skipped=skipped)
+            self._repo.save_booking(booking)
+            result.created.append(booking)
+        return result
 
     def cancel_booking(self, booking_id: str, cancelled_by: str) -> Booking:
         booking = self._repo.get_booking(booking_id)
@@ -145,6 +114,16 @@ class BookingService:
         return [b for b in self._repo.list_bookings(room_id) if b.is_active]
 
     # ---- rules -------------------------------------------------------
+    def _check_slot(self, room_id: str, start: datetime, end: datetime) -> None:
+        room = self._repo.get_room(room_id)
+        if room is None:
+            raise BookingError("ROOM_NOT_FOUND", f"ไม่พบห้อง {room_id}")
+        if end <= start:
+            raise BookingError("INVALID_TIME_RANGE", "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม")
+        self._check_advance_window(start)  # FR-2
+        self._check_duration(room, start, end)  # FR-3
+        self._check_business_hours(start, end)  # FR-4
+
     def _check_advance_window(self, start: datetime) -> None:
         now = self._clock()
         if start < now:
