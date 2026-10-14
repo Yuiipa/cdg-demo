@@ -1,87 +1,47 @@
+"""FR-1: ห้ามจองห้องเดียวกันซ้อนช่วงเวลา (ชนขอบได้ · การจองที่ยกเลิกแล้วไม่นับ)."""
+
 from datetime import datetime
 
 import pytest
 
 from booking import BookingError, BookingService, InMemoryRepository, Room
 
+NOW = datetime(2026, 10, 5, 9, 0)  # วันจันทร์
+
 
 @pytest.fixture
-def repo() -> InMemoryRepository:
+def service() -> BookingService:
     repo = InMemoryRepository()
     repo.add_room(Room(room_id="R101", name="ห้องประชุมใหญ่", capacity=20))
     repo.add_room(Room(room_id="R102", name="ห้องประชุมเล็ก", capacity=6))
-    return repo
+    return BookingService(repo, clock=lambda: NOW)
 
 
-@pytest.fixture
-def service(repo: InMemoryRepository) -> BookingService:
-    # ตรึงเวลาปัจจุบันไว้ที่ วันจันทร์ 5 ต.ค. 2026 09:00 เพื่อให้ผลทดสอบคงที่
-    fixed_now = datetime(2026, 10, 5, 9, 0)
-    return BookingService(repo, clock=lambda: fixed_now)
+def at(hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, 6, hour, minute)
 
 
-def test_overlap_partial_rejected(service: BookingService) -> None:
-    service.create_booking(
-        room_id="R101",
-        user_id="somchai",
-        start=datetime(2026, 10, 6, 10, 0),
-        end=datetime(2026, 10, 6, 11, 0),
-    )
+def test_fr1_partial_overlap_rejected(service):
+    service.create_booking("R101", "u1", at(10), at(11))
     with pytest.raises(BookingError) as exc:
-        service.create_booking(
-            room_id="R101",
-            user_id="malee",
-            start=datetime(2026, 10, 6, 10, 30),
-            end=datetime(2026, 10, 6, 11, 30),
-        )
+        service.create_booking("R101", "u2", at(10, 30), at(11, 30))
     assert exc.value.code == "BOOKING_OVERLAP"
 
 
-def test_back_to_back_booking_succeeds(service: BookingService) -> None:
-    service.create_booking(
-        room_id="R101",
-        user_id="somchai",
-        start=datetime(2026, 10, 6, 10, 0),
-        end=datetime(2026, 10, 6, 11, 0),
-    )
-    booking = service.create_booking(
-        room_id="R101",
-        user_id="malee",
-        start=datetime(2026, 10, 6, 11, 0),
-        end=datetime(2026, 10, 6, 12, 0),
-    )
-    assert booking.is_active
+def test_fr1_containment_rejected(service):
+    service.create_booking("R101", "u1", at(10), at(12))
+    with pytest.raises(BookingError) as exc:
+        service.create_booking("R101", "u2", at(10, 30), at(11))
+    assert exc.value.code == "BOOKING_OVERLAP"
 
 
-def test_cancelled_booking_does_not_block_overlap(service: BookingService) -> None:
-    existing = service.create_booking(
-        room_id="R101",
-        user_id="somchai",
-        start=datetime(2026, 10, 6, 10, 0),
-        end=datetime(2026, 10, 6, 11, 0),
-    )
-    service.cancel_booking(existing.booking_id, cancelled_by="somchai")
-
-    booking = service.create_booking(
-        room_id="R101",
-        user_id="malee",
-        start=datetime(2026, 10, 6, 10, 30),
-        end=datetime(2026, 10, 6, 11, 30),
-    )
-    assert booking.is_active
+def test_fr1_touching_allowed(service):
+    service.create_booking("R101", "u1", at(10), at(11))
+    assert service.create_booking("R101", "u2", at(11), at(12)).is_active
+    assert service.create_booking("R102", "u3", at(10), at(11)).is_active  # คนละห้อง
 
 
-def test_same_time_different_room_succeeds(service: BookingService) -> None:
-    service.create_booking(
-        room_id="R101",
-        user_id="somchai",
-        start=datetime(2026, 10, 6, 10, 0),
-        end=datetime(2026, 10, 6, 11, 0),
-    )
-    booking = service.create_booking(
-        room_id="R102",
-        user_id="malee",
-        start=datetime(2026, 10, 6, 10, 0),
-        end=datetime(2026, 10, 6, 11, 0),
-    )
-    assert booking.is_active
+def test_fr1_cancelled_booking_ignored(service):
+    first = service.create_booking("R101", "u1", at(13), at(14))
+    service.cancel_booking(first.booking_id, "u1")
+    assert service.create_booking("R101", "u2", at(13), at(14)).is_active
