@@ -52,6 +52,7 @@ class BookingService:
         self._check_advance_window(start)  # FR-2
         self._check_duration(room, start, end)  # FR-3
         self._check_business_hours(start, end)  # FR-4
+        self._check_overlap(room_id, start, end)  # FR-1
 
         booking = Booking(room_id=room_id, user_id=user_id, start=start, end=end, title=title)
         self._repo.save_booking(booking)
@@ -73,6 +74,16 @@ class BookingService:
         return [b for b in self._repo.list_bookings(room_id) if b.is_active]
 
     # ---- rules -------------------------------------------------------
+    def _check_overlap(self, room_id: str, start: datetime, end: datetime) -> None:
+        for existing in self._repo.list_bookings(room_id):
+            if not existing.is_active:
+                continue
+            if existing.start < end and start < existing.end:
+                raise BookingError(
+                    "BOOKING_OVERLAP",
+                    f"ห้อง {room_id} มีการจองในช่วงเวลานี้อยู่แล้ว กรุณาเลือกเวลาอื่น",
+                )
+
     def _check_advance_window(self, start: datetime) -> None:
         now = self._clock()
         if start < now:
