@@ -10,7 +10,7 @@
 0. บันทึกแผนนี้เป็น intent/recurring-booking/plan.md ตาม template แล้วหยุดรอคำสั่ง ห้ามแก้ไฟล์อื่น
 1. models.py: เพิ่ม `series_id`, `RecurringResult`, `SkippedOccurrence`
 2. `booking/__init__.py`: export 2 type ใหม่
-3. service.py: `create_recurring_booking(room_id, user_id, start, end, weeks)` — validate `weeks` เป็น int 1–4 ไม่ผ่าน reject ทั้งคำขอ (`INVALID_RECURRENCE`/`RECURRENCE_TOO_LONG`)
+3. service.py: `create_recurring_booking(room_id, user_id, start, end, weeks)` — validate `weeks` เป็น int 1–4 ไม่ผ่าน reject ทั้งคำขอด้วยข้อความคงที่: ไม่ใช่ int หรือ < 1 → `INVALID_RECURRENCE` "จำนวนสัปดาห์ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป" (spec R2); > 4 → `RECURRENCE_TOO_LONG` "จองซ้ำได้ไม่เกิน 4 สัปดาห์ต่อชุด" (spec R3)
 4. `now = self._clock()` ครั้งเดียว เก็บไว้ใช้ตลอดลูป ห้ามเรียกซ้ำ
 5. ตรวจครั้งแรกด้วยของเดิม (room/time/`_check_duration`/`_check_business_hours`/`_check_advance_window`) ไม่ผ่าน reject ทั้งคำขอ — **ไม่รวม overlap** overlap ของทุกสัปดาห์รวมสัปดาห์แรกเช็คในลูป (ข้อ 7-8) เท่านั้น
 6. `series_id = uuid4().hex[:8]`; วน i=0..weeks-1 คำนวณ occurrence start/end = start/end + 7i วัน
