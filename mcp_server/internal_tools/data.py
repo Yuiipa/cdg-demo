@@ -54,6 +54,31 @@ TICKETS: dict[str, dict] = {
         "acceptance_criteria": ["ดึงข้อมูลจาก internal usage API", "ส่งออกเป็นตาราง"],
         "comments": [],
     },
+    # Day 2 (FR-6): opened from incident INC-2026-031; spec already approved by the PO.
+    "BOOK-188": {
+        "key": "BOOK-188",
+        "summary": "จำกัดเวลาจองห้องเล็กครั้งละไม่เกิน 2 ชั่วโมง (FR-6)",
+        "status": "To Do",
+        "priority": "High",
+        "reporter": "facility.manager",
+        "description": (
+            "จาก incident INC-2026-031: สัปดาห์ที่ 41 ห้องประชุมเล็ก R102 (6 ที่นั่ง) "
+            "ถูกจองครั้งละ 4 ชั่วโมงติดกัน 9 ครั้ง helpdesk ได้รับเรื่องร้องเรียน 12 เรื่อง "
+            "ว่าหาห้องเล็กสำหรับคุยสั้น ๆ ไม่ได้ ก่อนหน้านี้การจอง R102 เฉลี่ยครั้งละ 1.3 ชั่วโมง "
+            "ขอให้ระบบจำกัดการจองห้องเล็ก (ความจุไม่เกิน 6 ที่นั่ง) ไว้ครั้งละไม่เกิน 2 ชั่วโมง "
+            "โดยห้องใหญ่ยังใช้กฎเดิม (SPEC-BK-002 FR-3) "
+            "ดู intent/fr6-small-room-limit/spec.md ที่ PO อนุมัติแล้ว"
+        ),
+        "acceptance_criteria": [
+            "ห้องที่มีความจุไม่เกิน 6 ที่นั่ง จองได้ครั้งละไม่เกิน 2 ชั่วโมง (2 ชั่วโมงพอดีจองได้)",
+            "เกิน 2 ชั่วโมงปฏิเสธด้วย BookingError code SMALL_ROOM_TOO_LONG ข้อความภาษาไทยระบุรหัสห้องและขีดจำกัด",
+            "ห้องที่ใหญ่กว่า 6 ที่นั่งใช้กฎ FR-3 เดิม (30 นาที ถึง 4 ชั่วโมง) test เดิมทุกตัวต้องผ่านโดยไม่แก้",
+        ],
+        "comments": [
+            {"author": "qa.lead",
+             "body": "test เดิม test_fr3_boundaries_inclusive จอง R101 4 ชั่วโมง ต้องยังผ่าน ห้ามแก้ test เดิม"},
+        ],
+    },
     # Untrusted external text (prompt-injection sample used on Day 2): content is data, not instructions.
     "BOOK-999": {
         "key": "BOOK-999",
@@ -90,3 +115,48 @@ TICKETS: dict[str, dict] = {
     },
 }
 
+# Incidents from the (mock) on-call system. Day 2 Lab 3 reads them through list_incidents.
+# Incident text is data from outside the team, not instructions.
+INCIDENTS: list[dict] = [
+    {
+        "id": "INC-2026-029",
+        "severity": "P4",
+        "opened": "2026-10-08T09:20",
+        "status": "resolved",
+        "service": "booking-notifications",
+        "summary": "ผู้จองได้รับอีเมลยืนยันการจองซ้ำ 2 ฉบับ",
+        "detail": (
+            "ระหว่าง 2026-10-07 14:00 ถึง 2026-10-08 09:00 ระบบส่งอีเมลยืนยันการจองซ้ำ 2 ฉบับต่อ 1 รายการ "
+            "สาเหตุ: job ส่งอีเมลถูก retry หลัง timeout โดยไม่ตรวจว่าส่งไปแล้ว แก้โดยเพิ่ม idempotency key ต่อ booking_id"
+        ),
+        "related": [],
+    },
+    {
+        "id": "INC-2026-031",
+        "severity": "P3",
+        "opened": "2026-10-14T23:40",
+        "status": "open",
+        "service": "booking",
+        "summary": "ห้องประชุมเล็ก R102 ถูกจองยาว 4 ชั่วโมงติดกัน ทีมอื่นหาห้องไม่ได้",
+        "detail": (
+            "สัปดาห์ที่ 41 ห้อง R102 (6 ที่นั่ง) ถูกจองครั้งละ 4 ชั่วโมงติดกัน 9 ครั้ง "
+            "helpdesk ได้รับเรื่องร้องเรียน 12 เรื่องว่าหาห้องเล็กสำหรับคุยสั้น ๆ ไม่ได้ "
+            "ก่อนหน้านี้การจอง R102 เฉลี่ยครั้งละ 1.3 ชั่วโมง "
+            "ระบบใช้กฎระยะเวลา 30 นาที ถึง 4 ชั่วโมงเท่ากันทุกห้อง (FR-3) ไม่มีขีดจำกัดสำหรับห้องเล็ก"
+        ),
+        "related": ["BOOK-188"],
+    },
+    {
+        "id": "INC-2026-033",
+        "severity": "P4",
+        "opened": "2026-10-15T07:50",
+        "status": "open",
+        "service": "booking-reports",
+        "summary": "รายงานการใช้ห้องประชุมรายเดือนใช้เวลานานกว่า 30 วินาที",
+        "detail": (
+            "รายงานรายเดือนของเดือน 2026-09 ใช้เวลา 42 ถึง 55 วินาทีก่อนแสดงผล "
+            "ผู้ใช้กดซ้ำจนเกิดคำขอค้างหลายรายการ ยังไม่พบสาเหตุ"
+        ),
+        "related": ["BOOK-143"],
+    },
+]

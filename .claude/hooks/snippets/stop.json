@@ -1,0 +1,11 @@
+{
+  "name": "stop",
+  "event": "Stop",
+  "matcher": "",
+  "hook": {
+    "type": "command",
+    "shell": "bash",
+    "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_guard.py\"",
+    "timeout": 180
+  }
+}

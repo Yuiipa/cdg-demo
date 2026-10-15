@@ -3,14 +3,19 @@
 
 Usage (from the repo root):
     python scripts/hooks.py enable linkage [--no-selftest]   # self-test, then add to settings.json
+    python scripts/hooks.py enable protect stop              # Day 2 Lab 1
+    python scripts/hooks.py enable tamper                    # Day 2 Lab 4 (blue team)
     python scripts/hooks.py disable linkage
     python scripts/hooks.py status
-    python scripts/hooks.py test linkage | protect | all
+    python scripts/hooks.py test linkage | protect | stop | tamper | all
 
 Hooks are described by snippet files in .claude/hooks/snippets/<name>.json
-({"name", "event", "matcher", "hook": {...}}); Day 2 adds more snippet files.
+({"name", "event", "matcher", "hook": {...}}). A snippet with an empty matcher (the Stop
+hook) is written as an entry WITHOUT a "matcher" key: hooks.Stop = [{"hooks": [...]}].
 Tests run each hook command through Git Bash exactly as Claude Code does
-(bash -c '<command>', CLAUDE_PROJECT_DIR set, JSON payload on stdin).
+(bash -c '<command>', CLAUDE_PROJECT_DIR set, JSON payload on stdin). The stop table uses the
+hook's env overrides (CDG_STOP_FAKE_PYTEST, CDG_STOP_STATE_DIR) so it never runs pytest and
+touches nothing in artifacts/.
 Exit codes: 0 = OK, 1 = self-test or a hook test failed, 2 = usage/environment error.
 """
 from __future__ import annotations
@@ -35,6 +40,7 @@ REPO = os.path.dirname(HERE)
 SETTINGS = os.path.join(REPO, ".claude", "settings.json")
 SNIP_DIR = os.path.join(REPO, ".claude", "hooks", "snippets")
 WINDOWS = os.name == "nt"
+KNOWN = ("linkage", "protect", "stop", "tamper")  # hooks with a test table
 
 
 # ------------------------------------------------------------------ Git Bash
@@ -74,21 +80,27 @@ def git_usr_bin(bash: str) -> str:
 
 
 def run_hook(bash: str, command: str, payload: bytes, env_extra: dict | None = None,
-             path_override: str | None = None) -> tuple[int, str]:
+             path_override: str | None = None) -> tuple[int, str, str]:
+    """Run one hook command through Git Bash. Returns (exit code, stderr, stdout).
+    env_extra values of None remove that variable (e.g. a CDG_LOOP_OWNER set in the terminal)."""
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = REPO
-    if env_extra:
-        env.update(env_extra)
+    for k, v in (env_extra or {}).items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = str(v)
     if path_override is not None:
         env["PATH"] = path_override
     try:
         p = subprocess.run([bash, "-c", command], input=payload, capture_output=True, env=env, timeout=60, cwd=REPO)
     except subprocess.TimeoutExpired:
-        return 124, "timeout"
+        return 124, "timeout", ""
     except OSError as exc:
-        return 127, str(exc)
+        return 127, str(exc), ""
     err = p.stderr.decode("utf-8", "replace").strip()
-    return p.returncode, err
+    out = p.stdout.decode("utf-8", "replace").strip()
+    return p.returncode, err, out
 
 
 def bash_python(bash: str) -> tuple[bool, str]:
@@ -155,6 +167,12 @@ def payload(tool: str, tool_input: dict | None) -> bytes:
            "permission_mode": "acceptEdits", "hook_event_name": "PreToolUse", "tool_name": tool}
     if tool_input is not None:
         obj["tool_input"] = tool_input
+    return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+def stop_payload(active: bool = False) -> bytes:
+    obj = {"session_id": "hooks-selftest", "transcript_path": "", "cwd": REPO,
+           "permission_mode": "acceptEdits", "hook_event_name": "Stop", "stop_hook_active": active}
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
@@ -245,15 +263,83 @@ def protect_cases() -> list[tuple[str, bytes, int, bool]]:
     ]
 
 
-def selftest_cases(name: str, tmp_msg: str):
+ATTACK_B = ("python -c \"import pathlib;p=pathlib.Path('tests/test_rules.py');"
+            "p.write_text(p.read_text(encoding='utf-8').replace('13, 0', '11, 0'),encoding='utf-8')\"")
+
+
+def tamper_cases() -> list[tuple[str, bytes, int, bool]]:
+    B = lambda c: payload("Bash", {"command": c})
+    return [
+        ("Bash python -c ... write_text(tests/test_rules.py) (Lab 4 attack B)", B(ATTACK_B), 2, False),
+        ("Bash echo x > tests\\Test_Rules.py (redirect, backslash, other case)", B("echo x > tests\\Test_Rules.py"), 2, False),
+        ("malformed JSON on stdin", b"{nope", 2, False),
+        ("Bash python -m pytest tests/test_rules.py (read-only)", B("python -m pytest tests/test_rules.py"), 0, False),
+        ("Bash echo note > artifacts/notes.txt (redirect, not protected)", B("echo note > artifacts/notes.txt"), 0, False),
+        ("Monitor payload without command", payload("Monitor", {"description": "watch"}), 0, False),
+    ]
+
+
+def stop_cases(state_dir: str) -> list[tuple[str, dict, bool, str, str]]:
+    """(label, env, want_block, want_substring_in_reason, pre-step). The hook's env overrides keep it
+    deterministic: CDG_STOP_FAKE_PYTEST skips pytest, CDG_STOP_STATE_DIR keeps artifacts/ untouched."""
+    base = {"CDG_STOP_STATE_DIR": state_dir, "CDG_LOOP_OWNER": None}
+    env = lambda **kw: {**base, **kw}
+    return [
+        ("CDG_LOOP_OWNER=off with fake fail", env(CDG_LOOP_OWNER="off", CDG_STOP_FAKE_PYTEST="fail"), False, "", ""),
+        ("fake pytest pass", env(CDG_STOP_FAKE_PYTEST="pass"), False, "", ""),
+        ("fake pytest fail, round 1", env(CDG_STOP_FAKE_PYTEST="fail"), True, "รอบ 1/3", ""),
+        ("fake pytest fail, round 2", env(CDG_STOP_FAKE_PYTEST="fail"), True, "รอบ 2/3", ""),
+        ("fake pytest fail, round 3 (escalate)", env(CDG_STOP_FAKE_PYTEST="fail"), True, "รอบ 3/3", ""),
+        ("fake pytest fail, round 4 (max rounds)", env(CDG_STOP_FAKE_PYTEST="fail"), False, "", ""),
+        ("escalation.md present, fake fail", env(CDG_STOP_FAKE_PYTEST="fail"), False, "", "escalation"),
+    ]
+
+
+def stop_prepare(state_dir: str, step: str) -> None:
+    if step == "escalation":
+        try:
+            os.remove(os.path.join(state_dir, ".round"))
+        except OSError:
+            pass
+        with open(os.path.join(state_dir, "escalation.md"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("# Escalation: hooks.py test stop\n")
+
+
+def stop_result(got: int, out: str, want_block: bool, want_sub: str) -> tuple[bool, str]:
+    """Judge one stop case. Returns (ok, short description)."""
+    if got != 0:
+        return False, f"exit {got} (want 0)"
+    if not want_block:
+        return (out.strip() == ""), ("allow" if out.strip() == "" else f"unexpected stdout: {out.splitlines()[0][:120]}")
+    try:
+        obj = json.loads(out)
+    except ValueError:
+        return False, f"stdout is not JSON: {out[:120]!r}"
+    if obj.get("decision") != "block":
+        return False, f"decision {obj.get('decision')!r} (want block)"
+    reason = str(obj.get("reason", ""))
+    if want_sub and want_sub not in reason:
+        return False, f"reason lacks {want_sub!r}: {reason[:120]}"
+    return True, f"block ({want_sub})" if want_sub else "block"
+
+
+def selftest_cases(name: str, tmp_msg: str) -> list[tuple[str, bytes, int, dict | None, bool]]:
+    """(label, payload, want exit, env extra, stdout must be empty)."""
     if name == "linkage":
         ok = sample_ticket(ticket_pattern()) or "PLAT-7"
-        return [("block: git commit without Refs", payload("Bash", {"command": 'git commit -m "selftest"'}), 2),
+        return [("block: git commit without Refs", payload("Bash", {"command": 'git commit -m "selftest"'}), 2, None, False),
                 (f"allow: git commit with Refs: {ok}",
-                 payload("Bash", {"command": f'git commit -m "selftest" --trailer "Refs: {ok}"'}), 0)]
+                 payload("Bash", {"command": f'git commit -m "selftest" --trailer "Refs: {ok}"'}), 0, None, False)]
     if name == "protect":
-        return [("block: Edit tests/test_rules.py", payload("Edit", {"file_path": "tests/test_rules.py"}), 2),
-                ("allow: Write tests/test_selftest_new.py", payload("Write", {"file_path": "tests/test_selftest_new.py"}), 0)]
+        return [("block: Edit tests/test_rules.py", payload("Edit", {"file_path": "tests/test_rules.py"}), 2, None, False),
+                ("allow: Write tests/test_selftest_new.py", payload("Write", {"file_path": "tests/test_selftest_new.py"}), 0, None, False)]
+    if name == "stop":
+        return [("allow: Stop payload with CDG_LOOP_OWNER=off (python runs, no output)", stop_payload(),
+                 0, {"CDG_LOOP_OWNER": "off"}, True)]
+    if name == "tamper":
+        return [("block: python -c \"open('tests/test_rules.py','w')\"",
+                 payload("Bash", {"command": "python -c \"open('tests/test_rules.py','w')\""}), 2, None, False),
+                ("allow: git diff -- tests/test_rules.py", payload("Bash", {"command": "git diff -- tests/test_rules.py"}), 0, None, False)]
     return []
 
 
@@ -281,11 +367,14 @@ def cmd_enable(names: list[str], no_selftest: bool) -> int:
             tmp_msg = os.path.join(td, "msg.txt").replace("\\", "/")
             for name in names:
                 cmd = snippets[name]["hook"]["command"]
-                for label, data, want in selftest_cases(name, tmp_msg):
-                    got, err_text = run_hook(bash, cmd, data)
-                    if got != want:
+                for label, data, want, env_extra, quiet in selftest_cases(name, tmp_msg):
+                    got, err_text, out_text = run_hook(bash, cmd, data, env_extra=env_extra)
+                    bad = got != want or (quiet and out_text.strip() != "")
+                    if bad:
                         reason = f"{label} -> exit {got} (want {want})"
-                        if err_text:
+                        if quiet and out_text.strip():
+                            reason += f": unexpected stdout {out_text.splitlines()[0][:120]!r}"
+                        elif err_text:
                             reason += f": {err_text.splitlines()[0][:160]}"
                         print(f"FAIL  selftest {name}: {reason}")
                         print(f"      {FIX_HINT}")
@@ -298,17 +387,17 @@ def cmd_enable(names: list[str], no_selftest: bool) -> int:
     hooks = settings.setdefault("hooks", {})
     for name in names:
         snip = snippets[name]
-        event, matcher, hook = snip["event"], snip["matcher"], dict(snip["hook"])
+        event, matcher, hook = snip["event"], (snip.get("matcher") or ""), dict(snip["hook"])
         entries = hooks.setdefault(event, [])
-        entry = next((e for e in entries if e.get("matcher") == matcher), None)
+        entry = next((e for e in entries if (e.get("matcher") or "") == matcher), None)
         if entry is None:
-            entry = {"matcher": matcher, "hooks": []}
+            entry = {"matcher": matcher, "hooks": []} if matcher else {"hooks": []}  # empty matcher -> no key
             entries.append(entry)
         if any(h.get("command") == hook.get("command") for h in entry.setdefault("hooks", [])):
             print(f"INFO  {name} already enabled")
         else:
             entry["hooks"].append(hook)
-        print(f"ENABLED {name} ({event} {matcher})")
+        print(f"ENABLED {name} ({event} {matcher})" if matcher else f"ENABLED {name} ({event})")
     write_settings(settings)
     print("next: git diff .claude/settings.json")
     return 0
@@ -378,9 +467,9 @@ def cmd_status() -> int:
 def cmd_test(which: str) -> int:
     snippets = load_snippets()
     names = list(snippets) if which == "all" else [which]
-    names = [n for n in names if n in ("linkage", "protect")]
+    names = [n for n in names if n in KNOWN]
     if not names or (which != "all" and which not in snippets):
-        print(f"FAIL  unknown hook '{which}' (use linkage, protect or all)")
+        print(f"FAIL  unknown hook '{which}' (use {', '.join(KNOWN)} or all; snippet file must exist)")
         return 2
     bash = find_bash()
     if bash is None:
@@ -399,12 +488,32 @@ def cmd_test(which: str) -> int:
         tmp_msg = os.path.join(td, "msg.txt").replace("\\", "/")
         with open(tmp_msg, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(f"feat: from file\n\nRefs: {ok_ticket}\n")
+        state_dir = os.path.join(td, "stop_state")
+        os.makedirs(state_dir, exist_ok=True)
         for name in names:
             cmd = snippets[name]["hook"]["command"]
-            cases = linkage_cases(tmp_msg, ok_ticket, bad_ticket) if name == "linkage" else protect_cases()
+            if name == "stop":
+                for label, env_extra, want_block, want_sub, pre in stop_cases(state_dir):
+                    total += 1
+                    stop_prepare(state_dir, pre)
+                    got, err_text, out_text = run_hook(bash, cmd, stop_payload(), env_extra=env_extra)
+                    ok, what = stop_result(got, out_text, want_block, want_sub)
+                    if ok:
+                        passed += 1
+                        print(f"PASS  stop: {label} -> exit {got} {what}")
+                    else:
+                        first = err_text.splitlines()[0][:160] if err_text else ""
+                        print(f"FAIL  stop: {label} -> {what} {first}".rstrip())
+                continue
+            if name == "linkage":
+                cases = linkage_cases(tmp_msg, ok_ticket, bad_ticket)
+            elif name == "protect":
+                cases = protect_cases()
+            else:
+                cases = tamper_cases()
             for label, data, want, no_python in cases:
                 total += 1
-                got, err_text = run_hook(bash, cmd, data, path_override=git_usr_bin(bash) if no_python else None)
+                got, err_text, _ = run_hook(bash, cmd, data, path_override=git_usr_bin(bash) if no_python else None)
                 if got == want:
                     passed += 1
                     print(f"PASS  {name}: {label} -> exit {got}")
@@ -425,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
     p_dis.add_argument("names", nargs="+")
     sub.add_parser("status", help="show enabled hooks and the python Git Bash will use")
     p_t = sub.add_parser("test", help="run the hook test table through Git Bash")
-    p_t.add_argument("which", choices=["linkage", "protect", "all"])
+    p_t.add_argument("which", choices=[*KNOWN, "all"])
     args = ap.parse_args(argv)
     if args.cmd == "enable":
         return cmd_enable(args.names, args.no_selftest)

@@ -31,7 +31,14 @@
       "mcp__internal-tools__get_ticket",
       "mcp__internal-tools__search_tickets",
       "mcp__internal-tools__list_rooms",
-      "mcp__internal-tools__get_room_usage"
+      "mcp__internal-tools__get_room_usage",
+      "Bash(python scripts/loop.py *)",
+      "PowerShell(python scripts/loop.py *)",
+      "Bash(python scripts/hooks.py status)",
+      "Bash(python scripts/mcp_tools.py *)",
+      "PowerShell(python scripts/mcp_tools.py *)",
+      "Bash(python scripts/headless_summary.py *)",
+      "Bash(python scripts/day2_check.py)"
     ],
     "ask": [
       "mcp__internal-tools__add_ticket_comment",

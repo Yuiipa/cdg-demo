@@ -1,0 +1,11 @@
+{
+  "name": "tamper",
+  "event": "PreToolUse",
+  "matcher": "Bash|PowerShell|Monitor",
+  "hook": {
+    "type": "command",
+    "shell": "bash",
+    "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/tamper_guard.py\" || exit 2",
+    "timeout": 30
+  }
+}
