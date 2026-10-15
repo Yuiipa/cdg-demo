@@ -14,6 +14,8 @@ from booking.storage import InMemoryRepository
 MAX_ADVANCE = timedelta(days=30)
 MIN_DURATION = timedelta(minutes=30)
 MAX_DURATION = timedelta(hours=4)
+SMALL_ROOM_CAPACITY = 6
+SMALL_ROOM_MAX_DURATION = timedelta(hours=2)
 BUSINESS_START = time(8, 0)
 BUSINESS_END = time(18, 0)
 MIN_CANCEL_NOTICE = timedelta(hours=1)
@@ -138,6 +140,11 @@ class BookingService:
             raise BookingError(
                 "INVALID_DURATION",
                 f"ห้อง {room.room_id}: ระยะเวลาการจองต้องอยู่ระหว่าง 30 นาที ถึง 4 ชั่วโมง",
+            )
+        if room.capacity <= SMALL_ROOM_CAPACITY and duration > SMALL_ROOM_MAX_DURATION:  # FR-6
+            raise BookingError(
+                "SMALL_ROOM_TOO_LONG",
+                f"ห้อง {room.room_id} เป็นห้องเล็ก จองได้ครั้งละไม่เกิน 2 ชั่วโมง",
             )
 
     @staticmethod
